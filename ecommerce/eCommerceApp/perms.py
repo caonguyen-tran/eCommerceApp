@@ -22,7 +22,7 @@ class OwnerPermissions(IsAuthenticated):
 class AdminPermissions(IsAuthenticated):
 
     def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.is_admin
+        return (request.user and request.user.is_authenticated) and request.user.is_staff
 
 
 class StaffPermissions(IsAuthenticated):

@@ -5,6 +5,15 @@ from cloudinary import CloudinaryResource
 
 
 class UserSerializer(serializers.ModelSerializer):
+    avatar = serializers.SerializerMethodField(source="avatar")
+
+    def get_avatar(self, user):
+        if user.avatar:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri('/static/%s' % user.avatar.name)
+            return '/static/%s' % user.avatar.name
+
     def create(self, validated_data):
         data = validated_data.copy()
 
@@ -32,9 +41,18 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
+    image = serializers.SerializerMethodField(source='image')
+
+    def get_image(self, cate):
+        if cate:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri('/static/%s' % cate.image.name)
+            return '/static/%s' % cate.image.name
+
     class Meta:
         model = Category
-        fields = ['id', 'name']
+        fields = ['id', 'name', 'image']
 
 
 class ShopSerializer(serializers.ModelSerializer):
@@ -50,7 +68,7 @@ class ShopSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Shop
-        fields = ['id', 'name', 'date_created', 'logo', 'confirm_status', 'user']
+        fields = ['id', 'name', 'address', 'date_created', 'logo', 'confirm_status', 'user']
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -79,6 +97,15 @@ class CartDetailSerializer(serializers.ModelSerializer):
 
 
 class PaySerializer(serializers.ModelSerializer):
+    image = serializers.SerializerMethodField(source='image')
+
+    def get_image(self, pay):
+        if pay.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri('/static/%s' % pay.image.name)
+            return '/static/%s' % pay.image.name
+
     class Meta:
         model = Pay
         fields = ['id', 'name', 'image']

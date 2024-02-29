@@ -47,7 +47,9 @@ INSTALLED_APPS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'oauth2_provider.contrib.rest_framework.OAuth2Authentication',
-    )
+    ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 2
 }
 
 CKEDITOR_UPLOAD_PATH = "ckeditor/images/"
@@ -72,6 +74,7 @@ MIDDLEWARE = [
 ]
 
 import pymysql
+
 pymysql.install_as_MySQLdb()
 
 ROOT_URLCONF = 'eCommerceProject.urls'

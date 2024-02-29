@@ -2,15 +2,30 @@ from rest_framework import viewsets, generics, permissions, decorators, status, 
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import serializer
+from . import serializer, paginator
 from .models import Category, Product, User, Shop, CartDetail, Order, Pay, OrderDetail
-from .perms import StaffPermissions, ShopConfirmPermissions, UserPermissions, ProductOwnerPermissions, OwnerPermissions
+from .perms import StaffPermissions, ShopConfirmPermissions, UserPermissions, ProductOwnerPermissions, OwnerPermissions, \
+    AdminPermissions
 from .utils import confirm_status_update, user_update, sum_price
 
 
-class CategoryViewSet(viewsets.ViewSet, generics.ListAPIView):
+class CategoryViewSet(viewsets.ViewSet, generics.ListAPIView, generics.CreateAPIView, generics.DestroyAPIView):
     queryset = Category.objects.all()
     serializer_class = serializer.CategorySerializer
+
+    def create(self, request, *args, **kwargs):
+        try:
+            p = Category.objects.create(name=request.data.get('name'), image=request.data.get('image'))
+            p.save()
+            return Response(serializer.CategorySerializer(p, context={'request': request}).data,
+                            status=status.HTTP_201_CREATED)
+        except Product.DoesNotExist:
+            return Response(status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get_permissions(self):
+        if self.action in ['create', 'destroy']:
+            return [AdminPermissions()]
+        return [permissions.AllowAny()]
 
 
 class ProductViewSet(viewsets.ViewSet, generics.ListAPIView, generics.DestroyAPIView, generics.RetrieveUpdateAPIView):
@@ -23,6 +38,21 @@ class ProductViewSet(viewsets.ViewSet, generics.ListAPIView, generics.DestroyAPI
         elif self.action in ['destroy']:
             return [ProductOwnerPermissions()]
         return [permissions.IsAuthenticated()]
+
+    def list(self, request, *args, **kwargs):
+        kw = request.query_params.get('kw', None)
+        cate_id = request.query_params.get('cate_id', None)
+        if kw:
+            products = Product.objects.filter(name__icontains=kw)
+        elif cate_id:
+            products = Product.objects.filter(category=cate_id)
+        else:
+            products = Product.objects.all()
+        page = self.paginate_queryset(products)
+        if page is not None:
+            serialize = serializer.ProductSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serialize.data)
+        return Response(serializer.ProductSerializer(products, context={'request': request}, many=True).data)
 
     @action(methods=['post'], detail=True, url_path='add-cart', url_name='add-cart')
     def add_cart(self, request, pk):
@@ -39,7 +69,8 @@ class ProductViewSet(viewsets.ViewSet, generics.ListAPIView, generics.DestroyAPI
             new_cart.save()
 
         list_product = user.carts.all()
-        return Response(serializer.CartDetailSerializer(list_product, many=True).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.CartDetailSerializer(list_product, many=True, context={'request': request}).data,
+                        status=status.HTTP_201_CREATED)
 
 
 class UserViewSet(viewsets.ViewSet, generics.CreateAPIView):
@@ -53,20 +84,6 @@ class UserViewSet(viewsets.ViewSet, generics.CreateAPIView):
 
         return [permissions.AllowAny()]
 
-    # @action(methods=['post'], detail=False, url_path='create-user', url_name='create-user')
-    # def create_user(self, request):
-    #     try:
-    #         user = User.objects.create(username=request.data.get('username'), password=request.data.get('password'),
-    #                                    first_name=request.data.get('first_name'),
-    #                                    last_name=request.data.get('last_name'), email=request.data.get('email'),
-    #                                    avatar=request.data.get('avatar'), address=request.data.get('address'),
-    #                                    phone=request.data.get('phone'))
-    #         user.save()
-    #         return Response(serializer.UserSerializer(user, context={'request': request}).data,
-    #                         status=status.HTTP_201_CREATED)
-    #     except User.DoesNotExist:
-    #         return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
     @action(methods=['get'], detail=False, url_name='current-user', url_path='current-user')
     def current_user(self, request):
         return Response(serializer.UserSerializer(request.user, context={'request': request}).data,
@@ -75,7 +92,8 @@ class UserViewSet(viewsets.ViewSet, generics.CreateAPIView):
     @action(methods=['post'], detail=False, url_name='create-shop', url_path='create-shop')
     def create_shop(self, request):
         try:
-            shop = Shop.objects.create(name=request.data.get('name'), logo=request.data.get('logo'),
+            shop = Shop.objects.create(name=request.data.get('name'), address=request.data.get('address'),
+                                       logo=request.data.get('logo'),
                                        user_id=request.user.id)
             shop.save()
             return Response(serializer.ShopSerializer(shop, context={'request': request}).data,
@@ -89,11 +107,12 @@ class ShopViewSet(viewsets.ViewSet, generics.ListAPIView, generics.DestroyAPIVie
     serializer_class = serializer.ShopSerializer
 
     def get_permissions(self):
-        # if self.action in ['confirm']:
-        #     return [StaffPermissions()]
-        if self.action in ['add_product']:
+        if self.action in ['confirm']:
+            return [StaffPermissions()]
+        elif self.action in ['add_product']:
             return [ShopConfirmPermissions()]
-
+        elif self.action in ['current_shop', 'get_products']:
+            return [permissions.IsAuthenticated()]
         return [permissions.AllowAny()]
 
     @action(methods=['put'], url_path='confirm', detail=True)
@@ -118,6 +137,26 @@ class ShopViewSet(viewsets.ViewSet, generics.ListAPIView, generics.DestroyAPIVie
         except Product.DoesNotExist:
             return Response(status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(methods=['get'], detail=False, url_name="current-shop", url_path='current-shop')
+    def current_shop(self, request):
+        try:
+            current_user = request.user
+            query = Shop.objects.filter(user_id=current_user.id).first()
+            return Response(serializer.ShopSerializer(query, context={'request': request}).data,
+                            status=status.HTTP_200_OK)
+        except Shop.DoesNotExist:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(methods=['get'], detail=True, url_path="products", url_name='products')
+    def get_products(self, request, pk):
+        try:
+            shop = Shop.objects.get(pk=pk)
+            query = shop.products.all()
+            return Response(serializer.ProductSerializer(query, many=True, context={'request': request}).data,
+                            status=status.HTTP_200_OK)
+        except Shop.DoesNotExist:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class CartViewSet(viewsets.ViewSet, generics.ListAPIView):
     serializer_class = serializer.CartDetailSerializer
@@ -129,10 +168,11 @@ class CartViewSet(viewsets.ViewSet, generics.ListAPIView):
 
         return [permissions.IsAuthenticated()]
 
-    def list(self, request):
+    def list(self, request, *args, **kwargs):
         current_user = request.user
         queryset = current_user.carts.all()
-        return Response(serializer.CartDetailSerializer(queryset, many=True).data, status=status.HTTP_200_OK)
+        return Response(serializer.CartDetailSerializer(queryset, many=True, context={'request': request}).data,
+                        status=status.HTTP_200_OK)
 
     @action(methods=['delete'], detail=True, url_name='remove-product', url_path='remove-product')
     def remove_product(self, request, pk):
@@ -140,7 +180,8 @@ class CartViewSet(viewsets.ViewSet, generics.ListAPIView):
             pd = CartDetail.objects.get(pk=pk)
             pd.delete()
             query = request.user.carts.all()
-            return Response(serializer.CartDetailSerializer(query, many=True).data, status=status.HTTP_200_OK)
+            return Response(serializer.CartDetailSerializer(query, many=True, context={'request': request}).data,
+                            status=status.HTTP_200_OK)
         except CartDetail.DoesNotExist:
             return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -162,4 +203,38 @@ class CartViewSet(viewsets.ViewSet, generics.ListAPIView):
             else:
                 return Response(status=status.HTTP_204_NO_CONTENT)
         except Pay.DoesNotExist:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PayViewSet(viewsets.ViewSet, generics.ListAPIView, generics.CreateAPIView):
+    serializer_class = serializer.PaySerializer
+    queryset = Pay.objects.all()
+
+
+class OrderViewSet(viewsets.ViewSet, generics.ListAPIView):
+    serializer_class = serializer.OrderSerializer
+    queryset = Order.objects.all()
+
+    def get_permissions(self):
+        if self.action in ['order_detail']:
+            return [UserPermissions()]
+        return [permissions.IsAuthenticated()]
+
+    def list(self, request, *args, **kwargs):
+        try:
+            current_user = request.user
+            queryset = current_user.orders.all()
+            return Response(serializer.OrderSerializer(queryset, many=True, context={'request': request}).data,
+                            status=status.HTTP_200_OK)
+        except Order.DoesNotExist:
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(methods=['get'], detail=True, url_path='order-detail', url_name='order-detail')
+    def order_detail(self, request, pk):
+        try:
+            list_details = OrderDetail.objects.filter(order_id=pk)
+            return Response(
+                serializer.OrderDetailSerializer(list_details, many=True, context={'request': request}).data,
+                status=status.HTTP_200_OK)
+        except OrderDetail.DoesNotExist:
             return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)

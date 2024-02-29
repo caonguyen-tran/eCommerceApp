@@ -26,6 +26,7 @@ class Shop(models.Model):
 
 class Category(models.Model):
     name = models.CharField(max_length=200, null=False)
+    image = models.ImageField(upload_to="category/%Y/%m", default="category/2024/02/category_logo.png")
 
     def __str__(self):
         return self.name
@@ -36,7 +37,7 @@ class Product(models.Model):
     price = models.IntegerField(null=False)
     description = models.TextField(null=False)
     image = models.ImageField(upload_to="product/%Y/%m")
-    shop = models.ForeignKey('Shop', on_delete=models.CASCADE, null=False)
+    shop = models.ForeignKey('Shop', on_delete=models.CASCADE, null=False, related_name='products')
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, related_name="products")
 
     def __str__(self):
@@ -100,7 +101,7 @@ class Order(models.Model):
 
 class OrderDetail(models.Model):
     quantity = models.IntegerField(default=0)
-    total_price = models.FloatField()
+    total_price = models.IntegerField()
     order = models.ForeignKey(Order, on_delete=models.CASCADE, null=False)
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True)
 
